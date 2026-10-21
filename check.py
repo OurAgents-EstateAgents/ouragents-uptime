@@ -67,6 +67,20 @@ def send_email(kind, lines):
         raise
 
 
+def keep_key_alive():
+    """Brevo switches off keys unused for 90 days; touch it once a day."""
+    key = os.environ.get("BREVO_API_KEY", "")
+    if not key:
+        return
+    req = urllib.request.Request("https://api.brevo.com/v3/account",
+                                 headers={"api-key": key, "Accept": "application/json"})
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print(f"Brevo key checked, status {resp.status}")
+    except urllib.error.HTTPError as exc:
+        print(f"WARNING: Brevo key check failed: {exc.code} {exc.read().decode()[:200]}")
+
+
 def fetch(key):
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/rpc/uptime_status", data=b"{}", method="POST",
@@ -89,6 +103,8 @@ def main():
         found = problems(rows, now)
     for p in found:
         print("ALERT:", p)
+    if now.hour == 6 and now.minute < 5:
+        keep_key_alive()
     kind = email_kind(prev_failed, bool(found), now.minute)
     if kind:
         send_email(kind, found or ["All 3 pages are loading."])
