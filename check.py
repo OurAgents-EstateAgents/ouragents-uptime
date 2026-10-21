@@ -33,6 +33,36 @@ def problems(rows, now):
     return found
 
 
+def email_kind(prev_failed, now_failed, minute):
+    """Which email to send: "down" when the site first fails and once an hour
+    while it stays down, "up" when it recovers, otherwise None."""
+    if now_failed:
+        return "down" if (not prev_failed or minute < 5) else None
+    return "up" if prev_failed else None
+
+
+def send_email(kind, lines):
+    key = os.environ.get("BREVO_API_KEY", "")
+    if not key:
+        print("No BREVO_API_KEY secret yet - alert email not sent.")
+        return
+    to = [{"email": a.strip()} for a in os.environ.get("ALERT_TO", "hq@ouragents.co.uk").split(",") if a.strip()]
+    if kind == "down":
+        subject = "WEBSITE DOWN: ouragents.co.uk is not loading"
+        intro = "Our automatic check could not load the website from outside your network."
+    else:
+        subject = "Website back up: ouragents.co.uk is loading again"
+        intro = "The website is loading normally again."
+    body = "<p>" + intro + "</p><ul>" + "".join(f"<li>{l}</li>" for l in lines) + "</ul>"
+    payload = {"sender": {"name": "Our Agents website check", "email": "hq@ouragents.co.uk"},
+               "to": to, "subject": subject, "htmlContent": body}
+    req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode(),
+                                 method="POST", headers={"api-key": key, "Content-Type": "application/json",
+                                                         "Accept": "application/json"})
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        print(f"Alert email ({kind}) sent, Brevo status {resp.status}")
+
+
 def fetch(key):
     req = urllib.request.Request(
         f"{SUPABASE_URL}/rest/v1/rpc/uptime_status", data=b"{}", method="POST",
@@ -42,16 +72,22 @@ def fetch(key):
 
 
 def main():
+    now = datetime.now(timezone.utc)
+    prev_failed = os.environ.get("PREV_CONCLUSION") == "failure"
     if os.environ.get("FORCE_ALERT") == "true":
-        print("TEST ALERT: this run was started by hand to check that the alert email arrives.")
-        return 1
-    rows = fetch(os.environ["SUPABASE_KEY"])
-    for r in rows:
-        print(f"{'UP  ' if is_up(r['last_status']) else 'DOWN'} {r['last_status'] or r['last_error']} "
-              f"{r['url']} (checked {r['last_checked'][11:16]} UTC)")
-    found = problems(rows, datetime.now(timezone.utc))
+        found = ["TEST ALERT: started by hand to check that this email arrives. The website is fine."]
+        prev_failed = False
+    else:
+        rows = fetch(os.environ["SUPABASE_KEY"])
+        for r in rows:
+            print(f"{'UP  ' if is_up(r['last_status']) else 'DOWN'} {r['last_status'] or r['last_error']} "
+                  f"{r['url']} (checked {r['last_checked'][11:16]} UTC)")
+        found = problems(rows, now)
     for p in found:
         print("ALERT:", p)
+    kind = email_kind(prev_failed, bool(found), now.minute)
+    if kind:
+        send_email(kind, found or ["All 3 pages are loading."])
     return 1 if found else 0
 
 

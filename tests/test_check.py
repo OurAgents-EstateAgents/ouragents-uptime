@@ -28,4 +28,17 @@ for name, rows, want in cases:
     ok = (got > 0) == (want > 0)
     print("PASS" if ok else "FAIL", name, got)
     bad += not ok
+
+from check import email_kind
+# (previous run failed?, this run failed?, minute past the hour) -> email to send
+for prev, now_bad, minute, want in [
+    (False, True, 17, "down"),       # just went down: tell the owner
+    (True, True, 17, None),          # still down: no repeat every 5 minutes
+    (True, True, 2, "down"),         # still down: hourly reminder
+    (True, False, 17, "up"),         # back up: say so
+    (False, False, 17, None),        # all fine: silence
+]:
+    got = email_kind(prev, now_bad, minute)
+    print("PASS" if got == want else "FAIL", "email", prev, now_bad, minute, got)
+    bad += got != want
 sys.exit(1 if bad else 0)

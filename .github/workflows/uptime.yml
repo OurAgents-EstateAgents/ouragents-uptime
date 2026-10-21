@@ -3,8 +3,9 @@ name: Website uptime
 # Supabase loads 3 pages of ouragents.co.uk every 5 minutes (GitHub's own
 # servers are blocked by the website host's firewall, so they cannot check
 # directly). Every 5 minutes this reads those results; if a page failed
-# twice running, or the results stop arriving, this run fails and GitHub
-# emails the account owner.
+# twice running, or the results stop arriving, this run fails and an
+# alert email goes to hq@ouragents.co.uk through Brevo (once an hour while
+# the site stays down, and again when it comes back).
 on:
   schedule:
     - cron: '*/5 * * * *'
@@ -39,8 +40,18 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/uptime.yml/enable" || true
+      - name: Did the previous check fail?
+        id: prev
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          c=$(gh run list -R "${{ github.repository }}" -w uptime.yml -e schedule -s completed -L 1 --json conclusion --jq '.[0].conclusion' || true)
+          echo "conclusion=$c" >> "$GITHUB_OUTPUT"
       - name: Check ouragents.co.uk is loading
         env:
+          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          ALERT_TO: hq@ouragents.co.uk
+          PREV_CONCLUSION: ${{ steps.prev.outputs.conclusion }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
           FORCE_ALERT: ${{ github.event.inputs.test_alert }}
         run: python3 check.py
