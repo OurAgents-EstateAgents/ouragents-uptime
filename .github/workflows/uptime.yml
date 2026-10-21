@@ -4,8 +4,9 @@ name: Website uptime
 # networks), check that ouragents.co.uk loads. If a page is still down after
 # one retry, this run fails and GitHub emails the account owner.
 on:
-  schedule:
-    - cron: '*/5 * * * *'
+  # schedule paused: GitHub's servers are blocked by the website host's
+  # firewall, so direct checks from here give false alarms. Being moved
+  # to a Supabase-based check.
   workflow_dispatch:
     inputs:
       urls:
