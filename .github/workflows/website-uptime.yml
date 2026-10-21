@@ -1,4 +1,4 @@
-name: Website uptime
+name: Website uptime backup
 
 # Supabase loads 3 pages of ouragents.co.uk every 5 minutes (GitHub's own
 # servers are blocked by the website host's firewall, so they cannot check

@@ -1,13 +1,12 @@
 #!/usr/bin/env python3
-"""Alert when ouragents.co.uk stops loading.
+"""Backup watchdog for the website uptime monitor.
 
-The pages are loaded every 5 minutes by a scheduled job in Supabase (the
-website host's firewall blocks GitHub's servers, but not Supabase's). This
-script reads those results and fails when a page failed twice in a row,
-when results are missing, or when the latest results are more than 15
-minutes old. Emails go to the owner through Brevo's SMTP relay: on the
-first failure, hourly while down, on recovery, and a short "still
-watching" note every Monday morning (which also keeps the Brevo key in use).
+Supabase loads the pages every 5 minutes and its uptime-alert function
+emails the owner when the site is down. This GitHub job is the backup: it
+emails only when Supabase's results are missing or more than 15 minutes
+old, i.e. the Supabase monitor itself has stopped. A short "backup check is
+running" note goes out on the first Monday of each month, which also keeps
+this job's Brevo SMTP key from expiring after 90 idle days.
 """
 import json, os, smtplib, sys, urllib.request
 from datetime import datetime, timedelta, timezone
@@ -31,9 +30,6 @@ def problems(rows, now):
         checked = datetime.fromisoformat(r["last_checked"])
         if now - checked > STALE:
             found.append(f"{r['url']}: last checked {checked:%H:%M} UTC - the Supabase check may have stopped")
-        elif not is_up(r["last_status"]) and not is_up(r["prev_status"]):
-            found.append(f"{r['url']}: DOWN twice running "
-                         f"({r['last_status'] or r['last_error']}, then {r['prev_status'] or r['prev_error']})")
     return found
 
 
@@ -46,16 +42,17 @@ def email_kind(prev_failed, now_failed, minute):
 
 
 def weekly_due(now):
-    return now.weekday() == 0 and now.hour == 8 and now.minute < 5
+    """Monthly backup heartbeat: first Monday of the month, 09:00-09:59 UTC."""
+    return now.weekday() == 0 and now.day <= 7 and now.hour == 9
 
 
 SUBJECTS = {
-    "down": ("WEBSITE DOWN: ouragents.co.uk is not loading",
-             "Our automatic check could not load the website from outside your network."),
-    "up": ("Website back up: ouragents.co.uk is loading again",
-           "The website is loading normally again."),
-    "weekly": ("Weekly: website check is running",
-               "Just to confirm the automatic website check is still running. Nothing needs doing."),
+    "down": ("WEBSITE CHECK STOPPED: ouragents.co.uk is no longer being watched",
+             "The automatic website check in Supabase has stopped reporting, so a real outage would not be noticed. Please ask Claude to look at it."),
+    "up": ("Website check running again",
+           "The automatic website check in Supabase is reporting again."),
+    "weekly": ("Monthly: backup website check is running",
+               "Just to confirm the backup website check is still running. Nothing needs doing."),
 }
 
 

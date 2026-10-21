@@ -16,8 +16,8 @@ three_up = [row(200, 200, url=f"https://x/{i}") for i in range(3)]
 cases = [
     ("all up", three_up, 0),
     ("one blip", [row(503, 200)] + three_up[1:], 0),
-    ("down twice", [row(403, 403)] + three_up[1:], 1),
-    ("no answer twice", [row(None, None)] + three_up[1:], 1),
+    ("down twice is Supabase's job", [row(403, 403)] + three_up[1:], 0),
+    ("no answer twice is Supabase's job", [row(None, None)] + three_up[1:], 0),
     ("results stale", [row(200, 200, checked=old)] + three_up[1:], 1),
     ("missing pages", three_up[:1], 1),
     ("nothing at all", [], 1),
@@ -44,10 +44,11 @@ for prev, now_bad, minute, want in [
 
 from check import weekly_due
 for when, want in [
-    (datetime(2026, 10, 26, 8, 0, tzinfo=timezone.utc), True),    # Monday 08:00
-    (datetime(2026, 10, 26, 8, 4, tzinfo=timezone.utc), True),
-    (datetime(2026, 10, 26, 8, 5, tzinfo=timezone.utc), False),
-    (datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc), False),   # Tuesday
+    (datetime(2026, 11, 2, 9, 0, tzinfo=timezone.utc), True),     # first Monday of the month, 09:00
+    (datetime(2026, 11, 2, 9, 59, tzinfo=timezone.utc), True),
+    (datetime(2026, 11, 2, 10, 0, tzinfo=timezone.utc), False),
+    (datetime(2026, 11, 9, 9, 0, tzinfo=timezone.utc), False),    # second Monday
+    (datetime(2026, 11, 3, 9, 0, tzinfo=timezone.utc), False),    # Tuesday
 ]:
     got = weekly_due(when)
     print("PASS" if got == want else "FAIL", "weekly", when, got)

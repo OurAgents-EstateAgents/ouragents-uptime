@@ -1,13 +1,16 @@
 # Our Agents website uptime check
 
-Every 5 minutes a scheduled job in Supabase loads www.ouragents.co.uk (homepage, Morpeth page, blog).
-Every 5 minutes this GitHub workflow reads those results. If a page failed twice running, or the
-results stop arriving, it emails hq@ouragents.co.uk through Brevo: straight away, then once an hour
-while the site stays down, and once more when it is back.
+**Main monitor (Supabase project `ouragents`):** every 5 minutes the cron job `website-uptime` loads
+www.ouragents.co.uk (homepage, Morpeth page, blog) and keeps the results in `uptime_checks`.
+Two minutes later the cron job `website-uptime-alert` calls the edge function `uptime-alert`
+(source in `supabase/functions/uptime-alert/`), which asks `uptime_decide()` whether an email is due
+and sends it to hq@ouragents.co.uk through Brevo's SMTP relay: when a page fails twice running,
+hourly while it stays down, when it is back, and a short "still running" note on Monday mornings.
+The decision rules are tested in `tests/decide.sql`.
 
-Needs the repository secrets SUPABASE_KEY (Supabase publishable key), BREVO_SMTP_LOGIN and BREVO_SMTP_KEY
-(Brevo > SMTP & API > SMTP tab). The API route is not used: Brevo's authorised-IP blocking rejects
-GitHub's ever-changing addresses. Every Monday at 08:00 UTC a short "still running" email is sent,
-which also stops Brevo expiring the SMTP key after 90 idle days.
+**Backup (this GitHub workflow):** runs on GitHub's schedule (irregular, roughly hourly) and emails
+only if the Supabase results stop arriving, plus a monthly "backup is running" note.
+GitHub's own servers cannot load the website (blocked by the host's firewall), so it never checks the
+site directly. Secrets: SUPABASE_KEY, BREVO_SMTP_LOGIN, BREVO_SMTP_KEY.
 
-To test the alert: Actions > Website uptime > Run workflow, tick "Fail on purpose".
+To test the backup email: Actions > Website uptime backup > Run workflow, tick "Fail on purpose".
