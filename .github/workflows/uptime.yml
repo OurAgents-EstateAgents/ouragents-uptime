@@ -1,0 +1,47 @@
+name: Website uptime
+
+# Every 5 minutes, from GitHub's servers (outside the office and home
+# networks), check that ouragents.co.uk loads. If a page is still down after
+# one retry, this run fails and GitHub emails the account owner.
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      urls:
+        description: 'URLs to check instead of the usual three (space separated) - use a bad URL to test the alert'
+        required: false
+  push:
+    branches: [main]
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: uptime
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 6
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test the checker
+        if: github.event_name == 'push'
+        run: bash tests/check.test.sh
+      - name: Keep the schedule switched on
+        # GitHub turns off schedules in repos with no activity for 60 days.
+        if: github.event_name == 'schedule'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/uptime.yml/enable" || true
+      - name: Check ouragents.co.uk loads
+        env:
+          URLS: ${{ github.event.inputs.urls }}
+        run: |
+          if [ -z "$URLS" ]; then
+            URLS="https://www.ouragents.co.uk/ https://www.ouragents.co.uk/estate-agents-morpeth https://www.ouragents.co.uk/blog"
+          fi
+          ./check.sh $URLS
