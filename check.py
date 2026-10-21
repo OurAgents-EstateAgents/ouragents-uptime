@@ -1,76 +1,59 @@
 #!/usr/bin/env python3
-"""Check that each URL loads for real visitors.
+"""Alert when ouragents.co.uk stops loading.
 
-GitHub's own servers are blocked by the website host's firewall, so the
-check is made through check-host.net, which loads the page from several
-servers in different countries. A URL counts as down only when at least
-three servers answered and fewer than half of them got HTTP 200. A down
-URL is checked again after RETRY_WAIT seconds before it is reported.
-
-Exit 0 = up (or the outside service could not give an answer), 1 = down.
+The pages are loaded every 5 minutes by a scheduled job in Supabase (the
+website host's firewall blocks GitHub's servers, but not Supabase's). This
+script reads those results and exits 1 - which makes GitHub email the
+owner - when a page failed twice in a row, when results are missing, or
+when the latest results are more than 15 minutes old.
 """
-import json, os, sys, time, urllib.parse, urllib.request
+import json, os, sys, urllib.request
+from datetime import datetime, timedelta, timezone
 
-API = "https://check-host.net"
-NODES = int(os.environ.get("NODES", "4"))
-UA = "OurAgentsUptimeCheck/1.0 (+https://github.com/OurAgents-EstateAgents/ouragents-uptime)"
-RETRY_WAIT = int(os.environ.get("RETRY_WAIT", "60"))
-
-
-def verdict(results):
-    """results: check-host result map {node: [[ok, time, msg, code, ip]] or None}."""
-    answered = [r[0] for r in results.values() if r and r[0]]
-    if len(answered) < 3:
-        return "unknown"
-    up = sum(1 for r in answered if len(r) > 3 and r[3] == "200")
-    return "up" if up * 2 >= len(answered) else "down"
+SUPABASE_URL = "https://niokqzlfxpelgqqujeuy.supabase.co"
+PAGES = 3
+STALE = timedelta(minutes=15)
 
 
-def _get(url):
-    req = urllib.request.Request(url, headers={"Accept": "application/json", "User-Agent": UA})
+def is_up(status):
+    return status == 200
+
+
+def problems(rows, now):
+    found = []
+    if len(rows) < PAGES:
+        found.append(f"only {len(rows)} of {PAGES} pages have results - the Supabase check may have stopped")
+    for r in rows:
+        checked = datetime.fromisoformat(r["last_checked"])
+        if now - checked > STALE:
+            found.append(f"{r['url']}: last checked {checked:%H:%M} UTC - the Supabase check may have stopped")
+        elif not is_up(r["last_status"]) and not is_up(r["prev_status"]):
+            found.append(f"{r['url']}: DOWN twice running "
+                         f"({r['last_status'] or r['last_error']}, then {r['prev_status'] or r['prev_error']})")
+    return found
+
+
+def fetch(key):
+    req = urllib.request.Request(
+        f"{SUPABASE_URL}/rest/v1/rpc/uptime_status", data=b"{}", method="POST",
+        headers={"apikey": key, "Authorization": f"Bearer {key}", "Content-Type": "application/json"})
     with urllib.request.urlopen(req, timeout=30) as resp:
         return json.load(resp)
 
 
-def outside_check(url):
-    try:
-        q = urllib.parse.urlencode({"host": url, "max_nodes": NODES})
-        rid = _get(f"{API}/check-http?{q}")["request_id"]
-        results = {}
-        for _ in range(10):
-            time.sleep(4)
-            results = _get(f"{API}/check-result/{rid}")
-            if all(v is not None for v in results.values()):
-                break
-        return verdict(results), results
-    except Exception as exc:  # outside service failed: no verdict
-        return "unknown", {"error": str(exc)}
-
-
-def summary(results):
-    out = []
-    for node, r in results.items():
-        if node == "error":
-            out.append(f"error: {r}")
-        elif r and r[0]:
-            out.append(f"{node.split('.')[0]}={r[0][3] or r[0][2]}")
-        else:
-            out.append(f"{node.split('.')[0]}=no answer")
-    return ", ".join(out)
-
-
-def main(urls):
-    down = False
-    for url in urls:
-        state, results = outside_check(url)
-        if state == "down":
-            time.sleep(RETRY_WAIT)
-            state, results = outside_check(url)
-        label = {"up": "UP  ", "down": "DOWN", "unknown": "??  "}[state]
-        print(f"{label} {url}  [{summary(results)}]", flush=True)
-        down = down or state == "down"
-    return 1 if down else 0
+def main():
+    if os.environ.get("FORCE_ALERT") == "true":
+        print("TEST ALERT: this run was started by hand to check that the alert email arrives.")
+        return 1
+    rows = fetch(os.environ["SUPABASE_KEY"])
+    for r in rows:
+        print(f"{'UP  ' if is_up(r['last_status']) else 'DOWN'} {r['last_status'] or r['last_error']} "
+              f"{r['url']} (checked {r['last_checked'][11:16]} UTC)")
+    found = problems(rows, datetime.now(timezone.utc))
+    for p in found:
+        print("ALERT:", p)
+    return 1 if found else 0
 
 
 if __name__ == "__main__":
-    sys.exit(main(sys.argv[1:]))
+    sys.exit(main())

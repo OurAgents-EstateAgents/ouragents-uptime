@@ -1,17 +1,19 @@
 name: Website uptime
 
-# Every 5 minutes, from GitHub's servers (outside the office and home
-# networks), check that ouragents.co.uk loads. If a page is still down after
-# one retry, this run fails and GitHub emails the account owner.
+# Supabase loads 3 pages of ouragents.co.uk every 5 minutes (GitHub's own
+# servers are blocked by the website host's firewall, so they cannot check
+# directly). Every 5 minutes this reads those results; if a page failed
+# twice running, or the results stop arriving, this run fails and GitHub
+# emails the account owner.
 on:
-  # schedule paused: GitHub's servers are blocked by the website host's
-  # firewall, so direct checks from here give false alarms. Being moved
-  # to a Supabase-based check.
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
     inputs:
-      urls:
-        description: 'URLs to check instead of the usual three (space separated) - use a bad URL to test the alert'
-        required: false
+      test_alert:
+        description: 'Fail on purpose to check the alert email arrives'
+        type: boolean
+        default: false
   push:
     branches: [main]
 
@@ -26,11 +28,10 @@ concurrency:
 jobs:
   check:
     runs-on: ubuntu-latest
-    timeout-minutes: 6
+    timeout-minutes: 3
     steps:
       - uses: actions/checkout@v4
-      - name: Test the checker
-        if: github.event_name == 'push'
+      - name: Test the alert rule
         run: python3 tests/test_check.py
       - name: Keep the schedule switched on
         # GitHub turns off schedules in repos with no activity for 60 days.
@@ -38,11 +39,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/uptime.yml/enable" || true
-      - name: Check ouragents.co.uk loads
+      - name: Check ouragents.co.uk is loading
         env:
-          URLS: ${{ github.event.inputs.urls }}
-        run: |
-          if [ -z "$URLS" ]; then
-            URLS="https://www.ouragents.co.uk/ https://www.ouragents.co.uk/estate-agents-morpeth https://www.ouragents.co.uk/blog"
-          fi
-          python3 check.py $URLS
+          SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
+          FORCE_ALERT: ${{ github.event.inputs.test_alert }}
+        run: python3 check.py
