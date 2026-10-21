@@ -7,7 +7,7 @@ script reads those results and exits 1 - which makes GitHub email the
 owner - when a page failed twice in a row, when results are missing, or
 when the latest results are more than 15 minutes old.
 """
-import json, os, sys, urllib.request
+import json, os, sys, urllib.error, urllib.request
 from datetime import datetime, timedelta, timezone
 
 SUPABASE_URL = "https://niokqzlfxpelgqqujeuy.supabase.co"
@@ -59,8 +59,12 @@ def send_email(kind, lines):
     req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode(),
                                  method="POST", headers={"api-key": key, "Content-Type": "application/json",
                                                          "Accept": "application/json"})
-    with urllib.request.urlopen(req, timeout=30) as resp:
-        print(f"Alert email ({kind}) sent, Brevo status {resp.status}")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            print(f"Alert email ({kind}) sent, Brevo status {resp.status}")
+    except urllib.error.HTTPError as exc:
+        print(f"Alert email ({kind}) NOT sent: Brevo said {exc.code} {exc.read().decode()[:300]}")
+        raise
 
 
 def fetch(key):
