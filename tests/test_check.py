@@ -41,4 +41,15 @@ for prev, now_bad, minute, want in [
     got = email_kind(prev, now_bad, minute)
     print("PASS" if got == want else "FAIL", "email", prev, now_bad, minute, got)
     bad += got != want
+
+from check import weekly_due
+for when, want in [
+    (datetime(2026, 10, 26, 8, 0, tzinfo=timezone.utc), True),    # Monday 08:00
+    (datetime(2026, 10, 26, 8, 4, tzinfo=timezone.utc), True),
+    (datetime(2026, 10, 26, 8, 5, tzinfo=timezone.utc), False),
+    (datetime(2026, 10, 27, 8, 0, tzinfo=timezone.utc), False),   # Tuesday
+]:
+    got = weekly_due(when)
+    print("PASS" if got == want else "FAIL", "weekly", when, got)
+    bad += got != want
 sys.exit(1 if bad else 0)

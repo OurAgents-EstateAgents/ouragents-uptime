@@ -3,16 +3,20 @@
 
 The pages are loaded every 5 minutes by a scheduled job in Supabase (the
 website host's firewall blocks GitHub's servers, but not Supabase's). This
-script reads those results and exits 1 - which makes GitHub email the
-owner - when a page failed twice in a row, when results are missing, or
-when the latest results are more than 15 minutes old.
+script reads those results and fails when a page failed twice in a row,
+when results are missing, or when the latest results are more than 15
+minutes old. Emails go to the owner through Brevo's SMTP relay: on the
+first failure, hourly while down, on recovery, and a short "still
+watching" note every Monday morning (which also keeps the Brevo key in use).
 """
-import json, os, sys, urllib.error, urllib.request
+import json, os, smtplib, sys, urllib.request
 from datetime import datetime, timedelta, timezone
+from email.message import EmailMessage
 
 SUPABASE_URL = "https://niokqzlfxpelgqqujeuy.supabase.co"
 PAGES = 3
 STALE = timedelta(minutes=15)
+SENDER = "hq@ouragents.co.uk"
 
 
 def is_up(status):
@@ -41,44 +45,37 @@ def email_kind(prev_failed, now_failed, minute):
     return "up" if prev_failed else None
 
 
+def weekly_due(now):
+    return now.weekday() == 0 and now.hour == 8 and now.minute < 5
+
+
+SUBJECTS = {
+    "down": ("WEBSITE DOWN: ouragents.co.uk is not loading",
+             "Our automatic check could not load the website from outside your network."),
+    "up": ("Website back up: ouragents.co.uk is loading again",
+           "The website is loading normally again."),
+    "weekly": ("Weekly: website check is running",
+               "Just to confirm the automatic website check is still running. Nothing needs doing."),
+}
+
+
 def send_email(kind, lines):
-    key = os.environ.get("BREVO_API_KEY", "")
-    if not key:
-        print("No BREVO_API_KEY secret yet - alert email not sent.")
+    login, key = os.environ.get("BREVO_SMTP_LOGIN", ""), os.environ.get("BREVO_SMTP_KEY", "")
+    if not (login and key):
+        print("No BREVO_SMTP_LOGIN / BREVO_SMTP_KEY secrets yet - email not sent.")
         return
-    to = [{"email": a.strip()} for a in os.environ.get("ALERT_TO", "hq@ouragents.co.uk").split(",") if a.strip()]
-    if kind == "down":
-        subject = "WEBSITE DOWN: ouragents.co.uk is not loading"
-        intro = "Our automatic check could not load the website from outside your network."
-    else:
-        subject = "Website back up: ouragents.co.uk is loading again"
-        intro = "The website is loading normally again."
-    body = "<p>" + intro + "</p><ul>" + "".join(f"<li>{l}</li>" for l in lines) + "</ul>"
-    payload = {"sender": {"name": "Our Agents website check", "email": "hq@ouragents.co.uk"},
-               "to": to, "subject": subject, "htmlContent": body}
-    req = urllib.request.Request("https://api.brevo.com/v3/smtp/email", data=json.dumps(payload).encode(),
-                                 method="POST", headers={"api-key": key, "Content-Type": "application/json",
-                                                         "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            print(f"Alert email ({kind}) sent, Brevo status {resp.status}")
-    except urllib.error.HTTPError as exc:
-        print(f"Alert email ({kind}) NOT sent: Brevo said {exc.code} {exc.read().decode()[:300]}")
-        raise
-
-
-def keep_key_alive():
-    """Brevo switches off keys unused for 90 days; touch it once a day."""
-    key = os.environ.get("BREVO_API_KEY", "")
-    if not key:
-        return
-    req = urllib.request.Request("https://api.brevo.com/v3/account",
-                                 headers={"api-key": key, "Accept": "application/json"})
-    try:
-        with urllib.request.urlopen(req, timeout=30) as resp:
-            print(f"Brevo key checked, status {resp.status}")
-    except urllib.error.HTTPError as exc:
-        print(f"WARNING: Brevo key check failed: {exc.code} {exc.read().decode()[:200]}")
+    subject, intro = SUBJECTS[kind]
+    msg = EmailMessage()
+    msg["From"] = f"Our Agents website check <{SENDER}>"
+    msg["To"] = os.environ.get("ALERT_TO", SENDER)
+    msg["Subject"] = subject
+    msg.set_content(intro + "\n\n" + "\n".join("- " + l for l in lines) +
+                    "\n\nChecks run every 5 minutes: https://github.com/OurAgents-EstateAgents/ouragents-uptime/actions\n")
+    with smtplib.SMTP("smtp-relay.brevo.com", 587, timeout=30) as s:
+        s.starttls()
+        s.login(login, key)
+        s.send_message(msg)
+    print(f"Email ({kind}) sent to {msg['To']}")
 
 
 def fetch(key):
@@ -103,11 +100,11 @@ def main():
         found = problems(rows, now)
     for p in found:
         print("ALERT:", p)
-    if now.hour == 6 and now.minute < 5:
-        keep_key_alive()
     kind = email_kind(prev_failed, bool(found), now.minute)
     if kind:
         send_email(kind, found or ["All 3 pages are loading."])
+    elif not found and weekly_due(now):
+        send_email("weekly", ["All 3 pages are loading."])
     return 1 if found else 0
 
 

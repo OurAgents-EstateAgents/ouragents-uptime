@@ -4,7 +4,7 @@ name: Website uptime
 # servers are blocked by the website host's firewall, so they cannot check
 # directly). Every 5 minutes this reads those results; if a page failed
 # twice running, or the results stop arriving, this run fails and an
-# alert email goes to hq@ouragents.co.uk through Brevo (once an hour while
+# alert email goes to hq@ouragents.co.uk through Brevo's SMTP relay (once an hour while
 # the site stays down, and again when it comes back).
 on:
   schedule:
@@ -49,7 +49,8 @@ jobs:
           echo "conclusion=$c" >> "$GITHUB_OUTPUT"
       - name: Check ouragents.co.uk is loading
         env:
-          BREVO_API_KEY: ${{ secrets.BREVO_API_KEY }}
+          BREVO_SMTP_LOGIN: ${{ secrets.BREVO_SMTP_LOGIN }}
+          BREVO_SMTP_KEY: ${{ secrets.BREVO_SMTP_KEY }}
           ALERT_TO: hq@ouragents.co.uk
           PREV_CONCLUSION: ${{ steps.prev.outputs.conclusion }}
           SUPABASE_KEY: ${{ secrets.SUPABASE_KEY }}
